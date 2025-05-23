@@ -6,8 +6,8 @@ This project uses pycryptodome for AES encryption.
 
 
 ## How to install dependencies
-pip install -r requirements.txt
-Use `npm install` to install packages.
+Use `pip install -r requirements.txt` to install dependencies.
+
 
 
 ##Project Description:
