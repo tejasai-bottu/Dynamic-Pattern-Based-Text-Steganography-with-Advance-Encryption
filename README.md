@@ -77,7 +77,7 @@ Python libraries: Crypto, hashlib, os, Padding
 
 ✔️ Resistant to brute-force attacks (up to 1.7 years to crack at 10¹¹ guesses/sec).
 
-###⚠️ Current Limitations:
+### ⚠️ Current Limitations:
 ❌ Sensitive to Minor Edits: Small changes in the text can break decryption.
 
 ❌ 13.5% Error Rate: Due to encoding ambiguities and transmission issues.
