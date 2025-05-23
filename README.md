@@ -1,0 +1,2 @@
+# Dynamic-Pattern-Based-Text-Steganography-with-Advance-Encryption
+This project presents a secure system that hides encrypted files (images, audio, video, text) within text documents using AES-256-CBC encryption and dynamic pattern-based encoding with zero-width and whitespace characters. The method ensures invisible, reversible file concealment with no visible trace unless decrypted with the correct key.
