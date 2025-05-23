@@ -7,6 +7,8 @@ This project uses pycryptodome for AES encryption.
 
 ## How to install dependencies
 pip install -r requirements.txt
+Use `npm install` to install packages.
+
 
 ##Project Description:
 In today's digital era, where cyber threats are escalating, the need for secure file transmission has become essential. This project introduces a novel steganographic and encryption-based system that enables the concealment of files (images, audio, video, text, etc.) within plain-looking text documents using dynamic pattern-based encoding and AES-256-CBC encryption.
