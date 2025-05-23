@@ -1,6 +1,6 @@
 # Dynamic-Pattern-Based-Text-Steganography-with-Advance-Encryption
 
-# My Python Project
+## My Python Project
 This project uses pycryptodome for AES encryption.
 
 
@@ -8,12 +8,12 @@ This project uses pycryptodome for AES encryption.
 ## How to install dependencies
 pip install -r requirements.txt
 
-###Project Description:
+##Project Description:
 In today's digital era, where cyber threats are escalating, the need for secure file transmission has become essential. This project introduces a novel steganographic and encryption-based system that enables the concealment of files (images, audio, video, text, etc.) within plain-looking text documents using dynamic pattern-based encoding and AES-256-CBC encryption.
 
 The core idea is to embed encrypted binary data invisibly inside a text file using Unicode zero-width characters and whitespace. The process is completely reversible, and no trace of the original file remains visible without the correct key.
 
-⚙️ How It Works:
+##⚙️ How It Works:
 🔐 Encryption Process:
 User Input:
 
@@ -35,7 +35,7 @@ Final Output:
 
 The output is a text file that looks normal but secretly contains the embedded, encrypted file.
 
-🔓 Decryption Process:
+##🔓 Decryption Process:
 User Input:
 
 The user provides the same 10-character password and the steganographic text file.
@@ -46,7 +46,7 @@ The invisible characters are mapped back to binary using the dynamic pattern.
 
 The binary data is then decrypted using AES-256-CBC to recover the original file.
 
-🧠 Key Technologies Used:
+##🧠 Key Technologies Used:
 AES-256-CBC encryption
 
 PBKDF2 (Key Derivation Function)
@@ -55,7 +55,7 @@ Unicode Zero-width Encoding
 
 Python libraries: Crypto, hashlib, os, Padding
 
-✅ Features & Benefits:
+##✅ Features & Benefits:
 ✅ Data Confidentiality: Ensures strong protection using AES-256.
 
 ✅ Invisible Storage: Hidden data is undetectable in plain sight.
@@ -66,7 +66,7 @@ Python libraries: Crypto, hashlib, os, Padding
 
 ✅ File Integrity Maintained: Zero data loss in encoding/decoding.
 
-🧪 Performance & Results:
+##🧪 Performance & Results:
 ✔️ Tested with 400+ files.
 
 ✔️ Achieved 100% accuracy in bit-level integrity.
@@ -75,7 +75,7 @@ Python libraries: Crypto, hashlib, os, Padding
 
 ✔️ Resistant to brute-force attacks (up to 1.7 years to crack at 10¹¹ guesses/sec).
 
-⚠️ Current Limitations:
+##⚠️ Current Limitations:
 ❌ Sensitive to Minor Edits: Small changes in the text can break decryption.
 
 ❌ 13.5% Error Rate: Due to encoding ambiguities and transmission issues.
