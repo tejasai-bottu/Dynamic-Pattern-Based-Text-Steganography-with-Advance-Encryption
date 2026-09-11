@@ -14,7 +14,9 @@ Key improvements over V1
   ✓  AES-256-GCM (authenticated encryption) — replaces AES-CBC
   ✓  PBKDF2-HMAC-SHA256 (200 000 iters) — replaces raw key repetition
   ✓  Adaptive zlib compression before encryption (skipped when not beneficial)
-  ✓  Direct bytes → base-N Unicode — eliminates the "010101…" binary-string stage
+  ✓  Correct integer base-N arithmetic: n^k >= 256^L, no fractional-bit hacks
+       _num_symbols() uses dual log estimates (log2 + ln) and takes their max
+       to guarantee the result is never an under-estimate
   ✓  Three validated alphabet profiles: SAFE (10), EXTENDED (26), MAX (122)
   ✓  Key-derived Fisher-Yates permutation of the validated alphabet
   ✓  Compact binary payload header (MAGIC · version · flags · profile · extension
@@ -23,12 +25,16 @@ Key improvements over V1
       (profile_id, total_bytes) so decryption never has to guess
   ✓  Capacity check before embedding — rejects impossible payloads early
   ✓  Even-spread sequential embedding — no whole-text permutation
+  ✓  Stage 1 standalone base-N self-test:
+       N ∈ {2, 4, 8, 10, 16, 26, 64, 122, 128, 256, 300}
+       13 data patterns each (empty, zeros, 0xFF, random, leading-zero, 1 kB)
 
 Requirements:  pip install pycryptodome
 Usage (interactive):   python stego_v2.py
 Usage (CLI):           python stego_v2.py encrypt --help
                        python stego_v2.py decrypt --help
                        python stego_v2.py test
+                       python stego_v2.py test-base-n
 """
 
 from __future__ import annotations
@@ -81,9 +87,9 @@ def _aes_encrypt(plaintext: bytes, password: str
     AES-256-GCM encrypt.
     Returns (salt, nonce, ciphertext, auth_tag).
     """
-    salt  = os.urandom(_SALT_LEN)
-    nonce = os.urandom(_NONCE_LEN)
-    key   = _derive_key(password, salt)
+    salt   = os.urandom(_SALT_LEN)
+    nonce  = os.urandom(_NONCE_LEN)
+    key    = _derive_key(password, salt)
     cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
     ciphertext, tag = cipher.encrypt_and_digest(plaintext)
     return salt, nonce, ciphertext, tag
@@ -116,7 +122,7 @@ def _compress(data: bytes) -> Tuple[bytes, bool]:
     """
     Compress with zlib level-9.
     Returns (result_bytes, was_compressed).
-    Skips compression when it would increase size (e.g. already-compressed formats).
+    Skips compression when it would increase size.
     """
     compressed = zlib.compress(data, level=9)
     if len(compressed) < len(data):
@@ -129,18 +135,119 @@ def _decompress(data: bytes) -> bytes:
 
 
 # =============================================================================
-# §3  ALPHABET PROFILES
+# §3  BASE-N ARITHMETIC — Pure integer operations
 # =============================================================================
 #
-#  Three tiers of invisible Unicode characters, validated conceptually by category:
+#  Correct mathematical model
+#  ──────────────────────────
+#  L bytes represent integers in the range  [0 .. 256^L − 1].
+#  To represent every such value in base N, we need k digits where:
+#
+#      N^k  ≥  256^L
+#
+#  Therefore the minimum digit count is:
+#
+#      k  =  ceil( log_N( 256^L ) )
+#          =  ceil( L · log(256) / log(N) )
+#          =  ceil( L · 8 / log₂(N) )
+#
+#  Note: for non-power-of-two N, log₂(N) is irrational, so a single
+#  floating-point ceil can be off by ±1 due to rounding.  We use two
+#  independent log bases and take their max to guarantee no under-estimate.
+#  An over-estimate of +1 is harmless: the extra digit is a leading zero.
+#
+#  Encode process (bytes → digits):
+#      value = int.from_bytes(data, "big")    # interpret as one big integer
+#      for i in range(k):
+#          digits[i] = value % N              # repeated division
+#          value    //= N
+#      digits.reverse()                       # big-endian order
+#
+#  Decode process (digits → bytes):
+#      value = Σ digits[i] · N^(k−1−i)       # Horner's method
+#      return value.to_bytes(L, "big")        # L from payload header
+#
+#  The decoder must know L (original byte length) to handle leading-zero
+#  bytes correctly (e.g., b"\x00\xA7" and b"\xA7" have different meanings).
+#  L is preserved in the binary payload header.
+#
+
+def _num_symbols(num_bytes: int, n: int) -> int:
+    """
+    Minimum number of base-n digits needed to represent any byte string of
+    length num_bytes — i.e. the smallest k with  n^k >= 256^num_bytes.
+
+    Two independent floating-point paths (log₂ and ln) are evaluated and
+    their maximum is returned, so the result is never an under-estimate.
+
+    An over-estimate of 1 is harmless: the extra symbol encodes a leading
+    zero digit and round-trips correctly because the decoder knows num_bytes.
+    """
+    if num_bytes == 0:
+        return 0
+    if n < 2:
+        raise ValueError(f"Alphabet size must be >= 2, got {n}")
+    # Path A: via log₂
+    k1 = math.ceil(num_bytes * 8.0 / math.log2(n))
+    # Path B: via natural log  (independent rounding path)
+    k2 = math.ceil(num_bytes * math.log(256.0) / math.log(float(n)))
+    return max(k1, k2)
+
+
+def _encode_bytes_to_digits(data: bytes, n: int) -> list:
+    """
+    Convert a byte string to a big-endian list of base-n integer digits.
+
+    Returns exactly _num_symbols(len(data), n) digits.  Leading zero digits
+    are included so the representation covers the full range [0, 256^len(data)),
+    which is essential for round-trip correctness when data starts with 0x00.
+
+    Each returned digit d satisfies  0 <= d < n.
+    """
+    num_syms = _num_symbols(len(data), n)
+    if not data:
+        return []
+    value  = int.from_bytes(data, "big")
+    digits: list = []
+    for _ in range(num_syms):
+        digits.append(value % n)
+        value //= n
+    digits.reverse()
+    return digits
+
+
+def _decode_digits_to_bytes(digits: list, n: int, num_bytes: int) -> bytes:
+    """
+    Reconstruct exactly num_bytes bytes from a sequence of base-n integer digits.
+
+    num_bytes MUST equal the original byte-string length used during encoding;
+    it is stored in the payload header for this purpose.  Big-endian fixed-width
+    conversion preserves leading zero bytes (e.g. b"\\x00\\xA7" ≠ b"\\xA7").
+    """
+    value = 0
+    for d in digits:
+        value = value * n + d
+    try:
+        return value.to_bytes(num_bytes, "big")
+    except OverflowError:
+        raise ValueError(
+            f"Decoded value overflows {num_bytes} bytes — "
+            "data may be corrupted or num_bytes is incorrect."
+        )
+
+
+# =============================================================================
+# §4  ALPHABET PROFILES
+# =============================================================================
+#
+#  Three tiers of invisible Unicode characters:
 #
 #  SAFE (10):     Zero-width / invisible format characters with universal support.
 #  EXTENDED (26): SAFE + 16 variation selectors (VS1–VS16, U+FE00–U+FE0F).
 #  MAX (122):     EXTENDED + 96 Unicode tag characters (U+E0020–U+E007F).
 #
-#  The key NEVER determines which characters belong to a profile (that is a
-#  property of the character and environment).  The key only determines the
-#  permutation of the validated set used during encoding.
+#  The key permutes the character order (Fisher-Yates), but never changes which
+#  characters belong to a profile — that is fixed by the Unicode spec.
 #
 
 PROFILE_SAFE     = 0
@@ -153,7 +260,6 @@ PROFILE_NAMES: dict = {
     PROFILE_MAX:      "MAX",
 }
 
-# ── SAFE: 10 universally-supported invisible characters ───────────────────────
 _SAFE_CHARS: list = [
     "\u200B",  # ZERO WIDTH SPACE
     "\u200C",  # ZERO WIDTH NON-JOINER
@@ -167,14 +273,11 @@ _SAFE_CHARS: list = [
     "\u00AD",  # SOFT HYPHEN
 ]
 
-# ── EXTENDED: + 16 variation selectors (VS1–VS16) ─────────────────────────────
-_VS_CHARS: list = [chr(cp) for cp in range(0xFE00, 0xFE10)]  # 16 chars
+_VS_CHARS:  list = [chr(cp) for cp in range(0xFE00, 0xFE10)]   # 16 chars
+_TAG_CHARS: list = [chr(cp) for cp in range(0xE0020, 0xE0080)] # 96 chars
 
-# ── MAX: + 96 Unicode tag characters ──────────────────────────────────────────
-_TAG_CHARS: list = [chr(cp) for cp in range(0xE0020, 0xE0080)]  # 96 chars
-
-_EXTENDED_CHARS = _SAFE_CHARS + _VS_CHARS          # 26 chars
-_MAX_CHARS      = _EXTENDED_CHARS + _TAG_CHARS     # 122 chars
+_EXTENDED_CHARS = _SAFE_CHARS + _VS_CHARS           # 26 chars
+_MAX_CHARS      = _EXTENDED_CHARS + _TAG_CHARS      # 122 chars
 
 _PROFILE_CHARS: dict = {
     PROFILE_SAFE:     _SAFE_CHARS,
@@ -182,7 +285,7 @@ _PROFILE_CHARS: dict = {
     PROFILE_MAX:      _MAX_CHARS,
 }
 
-# Union of every character we ever embed — used for extraction
+# Union of every stego character — used for extraction
 _ALL_STEGO_CHARS: frozenset = frozenset(
     ch for lst in _PROFILE_CHARS.values() for ch in lst
 )
@@ -222,7 +325,7 @@ def profile_info(profile_id: int) -> dict:
     """Return a summary dict for display."""
     chars = _get_profile_chars(profile_id)
     n     = len(chars)
-    bps   = math.log2(n) if n > 1 else 0.0
+    bps   = math.log2(n) if n > 1 else 0.0          # theoretical bits/symbol
     return {
         "id":           profile_id,
         "name":         PROFILE_NAMES[profile_id],
@@ -232,60 +335,48 @@ def profile_info(profile_id: int) -> dict:
 
 
 # =============================================================================
-# §4  BASE-N ENCODING / DECODING
+# §5  BASE-N UNICODE ENCODING / DECODING
 # =============================================================================
 #
-#  Core efficiency gain: treat encrypted bytes as a large integer and express it
-#  in base-N using the invisible alphabet — no intermediate "010101…" string.
+#  Thin wrappers that map between §3's integer digit lists and Unicode strings:
 #
-#  For N=10  (SAFE):     log2(10) ≈ 3.32 bits/symbol
-#  For N=26  (EXTENDED): log2(26) ≈ 4.70 bits/symbol  (+42% vs SAFE)
-#  For N=122 (MAX):      log2(122) ≈ 6.93 bits/symbol  (+109% vs SAFE)
+#    _encode_base_n : bytes → invisible Unicode string
+#                     digit d ∈ [0,N) → alphabet[d] character
+#    _decode_base_n : invisible Unicode string → bytes
+#                     character → alphabet position → digit → bytes
+#
+#  All arithmetic correctness lives in §3; these functions only do the
+#  alphabet ↔ digit mapping.
 #
 
 def _encode_base_n(data: bytes, alphabet: list) -> str:
     """
-    Encode arbitrary bytes → invisible Unicode string.
-    Produces exactly ceil(8·len(data) / log2(N)) symbols (fixed-width output).
+    Encode arbitrary bytes → invisible Unicode string via base-N integer arithmetic.
+    Output length = _num_symbols(len(data), N) characters.
     """
     n = len(alphabet)
     if n < 2:
-        raise ValueError("Alphabet must have ≥ 2 symbols.")
+        raise ValueError("Alphabet must have >= 2 symbols.")
     if not data:
         return ""
-    bits_per_sym = math.log2(n)
-    num_syms     = math.ceil(8 * len(data) / bits_per_sym)
-    value        = int.from_bytes(data, "big")
-    digits: list = []
-    for _ in range(num_syms):
-        digits.append(value % n)
-        value //= n
-    digits.reverse()
+    digits = _encode_bytes_to_digits(data, n)
     return "".join(alphabet[d] for d in digits)
 
 
 def _decode_base_n(symbols: str, alphabet: list, num_bytes: int) -> bytes:
     """
     Decode invisible Unicode string → bytes.
-    num_bytes MUST match the value used during encoding (stored in the payload header).
-    Handles leading-zero bytes correctly via big-endian integer reconstruction.
+    num_bytes MUST match the value stored in the payload header.
+    Characters not in the alphabet are silently skipped (defensive guard).
     """
-    n           = len(alphabet)
     char_to_idx = {c: i for i, c in enumerate(alphabet)}
-    value       = 0
-    for ch in symbols:
-        if ch in char_to_idx:
-            value = value * n + char_to_idx[ch]
-    try:
-        return value.to_bytes(num_bytes, "big")
-    except OverflowError:
-        raise ValueError(
-            "Decoded value overflows expected byte count — data may be corrupted."
-        )
+    n           = len(alphabet)
+    digits      = [char_to_idx[ch] for ch in symbols if ch in char_to_idx]
+    return _decode_digits_to_bytes(digits, n, num_bytes)
 
 
 # =============================================================================
-# §5  BINARY PAYLOAD FORMAT
+# §6  BINARY PAYLOAD FORMAT
 # =============================================================================
 #
 #  Layout (all multi-byte integers big-endian):
@@ -333,11 +424,11 @@ def _parse_payload(data: bytes) -> dict:
     """Parse binary payload. Returns all header fields plus ciphertext and tag."""
     off = 0
 
-    magic = data[off:off+4];   off += 4
+    magic = data[off:off+4]; off += 4
     if magic != _MAGIC:
         raise ValueError(f"Bad MAGIC: {magic!r}  (wrong password?)")
 
-    ver = data[off];           off += 1
+    ver = data[off]; off += 1
     if ver != _VERSION:
         raise ValueError(f"Unsupported format version {ver}")
 
@@ -363,33 +454,31 @@ def _parse_payload(data: bytes) -> dict:
 
 
 # =============================================================================
-# §6  INVISIBLE SYMBOL STREAM: EMBEDDING & EXTRACTION
+# §7  INVISIBLE SYMBOL STREAM: EMBEDDING & EXTRACTION
 # =============================================================================
 #
-#  The invisible symbol stream consists of two concatenated parts:
+#  Stream layout:
 #
-#  ┌────────────────────────────────────────────────────────────────┐
-#  │  LENGTH PREFIX  (always _PREFIX_SYMS symbols)                  │
-#  │  Encoded with the FIXED, unkeyed SAFE alphabet.               │
-#  │  Contains: profile_id (1 B) + total_payload_bytes (4 B)       │
-#  │  Purpose: bootstrap — lets the decoder find profile + length  │
-#  │           without needing to know the key alphabet first.     │
-#  ├────────────────────────────────────────────────────────────────┤
-#  │  MAIN PAYLOAD  (variable symbols)                              │
-#  │  Encoded with the KEY-PERMUTED alphabet for the declared      │
-#  │  profile.  Contains the full binary_payload bytes.            │
-#  └────────────────────────────────────────────────────────────────┘
+#  ┌──────────────────────────────────────────────────────────────────┐
+#  │  LENGTH PREFIX  (_PREFIX_SYMS symbols, always present)           │
+#  │  Encoded with the FIXED, unkeyed SAFE alphabet (10 chars).      │
+#  │  Contains: profile_id (1 B) + total_payload_bytes (4 B).        │
+#  │  Purpose: bootstrap — decoder learns profile + length before     │
+#  │           the key-permuted alphabet is constructed.              │
+#  ├──────────────────────────────────────────────────────────────────┤
+#  │  MAIN PAYLOAD  (variable number of symbols)                      │
+#  │  Encoded with the KEY-PERMUTED alphabet for the declared profile.│
+#  │  Contains the full binary_payload bytes.                         │
+#  └──────────────────────────────────────────────────────────────────┘
 #
-#  Both parts are concatenated, then spread evenly through the cover text
-#  at inter-character gap positions (one invisible symbol per gap).
+#  Both parts are embedded in document order, spread evenly through the
+#  cover text at inter-character gap positions.
 #
 
-_PREFIX_PAYLOAD_LEN = 5  # 1 byte profile_id + 4 bytes uint32
+_PREFIX_PAYLOAD_LEN = 5   # 1 byte profile_id + 4 bytes uint32 (total bytes)
 
-# Number of SAFE-alphabet symbols needed to encode _PREFIX_PAYLOAD_LEN bytes
-_PREFIX_SYMS: int = math.ceil(
-    8 * _PREFIX_PAYLOAD_LEN / math.log2(len(_SAFE_CHARS))
-)  # = 13 with len=10
+# Compute via §3's exact formula  (N=10, L=5  →  13 symbols)
+_PREFIX_SYMS: int = _num_symbols(_PREFIX_PAYLOAD_LEN, len(_SAFE_CHARS))
 
 
 # ── length prefix helpers ─────────────────────────────────────────────────────
@@ -397,7 +486,7 @@ _PREFIX_SYMS: int = math.ceil(
 def _encode_prefix(profile_id: int, total_bytes: int) -> str:
     """Encode (profile_id, total_bytes) → fixed _PREFIX_SYMS invisible symbols."""
     raw = struct.pack("B", profile_id) + struct.pack(">I", total_bytes)
-    s   = _encode_base_n(raw, _SAFE_CHARS)   # unkeyed, always consistent
+    s   = _encode_base_n(raw, _SAFE_CHARS)   # unkeyed, always SAFE alphabet
     assert len(s) == _PREFIX_SYMS, (
         f"Prefix symbol count mismatch: got {len(s)}, expected {_PREFIX_SYMS}"
     )
@@ -416,15 +505,25 @@ def _decode_prefix(symbols: str) -> Tuple[int, int]:
 
 def capacity_bytes(cover_text: str, profile_id: int) -> int:
     """
-    Return the maximum binary payload size (bytes) that can be hidden in
-    cover_text using the given profile, accounting for the prefix overhead.
+    Maximum binary payload size (bytes) that can be hidden in cover_text
+    using the given profile, accounting for the prefix symbol overhead.
+
+    Computes the largest L with _num_symbols(L, N) <= usable_gaps, i.e.
+        L = floor( usable * log(N) / log(256) )
+
+    Two independent estimates are taken and the minimum is returned to avoid
+    over-reporting (which could cause embedding to fail after a capacity check).
     """
     clean   = _strip_stego(cover_text)
-    n_gaps  = max(0, len(clean) - 1)          # inter-character gap count
-    usable  = max(0, n_gaps - _PREFIX_SYMS)   # gaps available for payload
+    n_gaps  = max(0, len(clean) - 1)
+    usable  = max(0, n_gaps - _PREFIX_SYMS)
     n_alpha = len(_get_profile_chars(profile_id))
-    bps     = math.log2(n_alpha) if n_alpha > 1 else 0.0
-    return int(usable * bps / 8)
+    if n_alpha < 2 or usable == 0:
+        return 0
+    # Two independent estimates; take minimum so we never over-report
+    c1 = int(usable * math.log2(n_alpha) / 8.0)
+    c2 = int(usable * math.log(float(n_alpha)) / math.log(256.0))
+    return min(c1, c2)
 
 
 # ── gap index computation ─────────────────────────────────────────────────────
@@ -433,10 +532,6 @@ def _gap_indices(n_sym: int, n_gaps: int) -> list:
     """
     Return n_sym evenly-spaced gap indices in [0, n_gaps-1].
     Gap index g means "insert invisible char after clean[g]".
-    Guaranteed to return n_sym distinct indices when n_sym <= n_gaps.
-
-    Proof of distinctness: consecutive terms differ by floor(n_gaps/n_sym) >= 1
-    because n_gaps >= n_sym.
     """
     if n_sym == 0:
         return []
@@ -475,9 +570,7 @@ def _embed_symbols(cover_text: str, all_symbols: str) -> str:
 
 def embed_payload(cover_text: str, binary_payload: bytes,
                   profile_id: int, password: str) -> str:
-    """
-    Full encode pipeline: binary_payload → invisible symbol stream → stego text.
-    """
+    """Full encode pipeline: binary_payload → invisible symbol stream → stego text."""
     alphabet     = _keyed_alphabet(profile_id, password)
     prefix_syms  = _encode_prefix(profile_id, len(binary_payload))
     payload_syms = _encode_base_n(binary_payload, alphabet)
@@ -497,10 +590,11 @@ def extract_payload(stego_text: str, password: str) -> bytes:
 
     Bootstrap sequence:
       1. Extract all invisible chars in document order.
-      2. Decode first _PREFIX_SYMS symbols using the fixed SAFE alphabet
-         → learn profile_id and total payload bytes.
-      3. Build the key-permuted alphabet for the declared profile.
-      4. Decode the next N symbols → total payload bytes.
+      2. Decode first _PREFIX_SYMS using the fixed SAFE alphabet
+         → profile_id and total_bytes.
+      3. Build key-permuted alphabet for the declared profile.
+      4. Compute n_payload_sym = _num_symbols(total_bytes, N).   ← uses §3
+      5. Decode next n_payload_sym symbols → total_bytes of payload.
     """
     invisible = _extract_symbols(stego_text)
 
@@ -510,7 +604,7 @@ def extract_payload(stego_text: str, password: str) -> bytes:
             f"need at least {_PREFIX_SYMS}.  Is this really a stego file?"
         )
 
-    # ── step 1: bootstrap ────────────────────────────────────────────────
+    # Step 1: bootstrap
     profile_id, total_bytes = _decode_prefix(invisible[:_PREFIX_SYMS])
 
     if profile_id not in _PROFILE_CHARS:
@@ -519,24 +613,23 @@ def extract_payload(stego_text: str, password: str) -> bytes:
             "Wrong password or corrupted prefix."
         )
 
-    # ── step 2: main payload decode ──────────────────────────────────────
-    alphabet     = _keyed_alphabet(profile_id, password)
-    bps          = math.log2(len(alphabet))
-    n_payload_sym = math.ceil(8 * total_bytes / bps)
+    # Step 2: main payload decode
+    alphabet      = _keyed_alphabet(profile_id, password)
+    n_payload_sym = _num_symbols(total_bytes, len(alphabet))   # §3 — exact
 
     payload_window = invisible[_PREFIX_SYMS : _PREFIX_SYMS + n_payload_sym]
 
     if len(payload_window) < n_payload_sym:
         raise ValueError(
             f"Incomplete payload symbols: expected {n_payload_sym}, "
-            f"got {len(payload_window)}.  Stego text may be truncated or corrupted."
+            f"got {len(payload_window)}.  File may be truncated or corrupted."
         )
 
     return _decode_base_n(payload_window, alphabet, total_bytes)
 
 
 # =============================================================================
-# §7  TOP-LEVEL WORKFLOWS
+# §8  TOP-LEVEL WORKFLOWS
 # =============================================================================
 
 def encrypt_file_to_stego(
@@ -587,10 +680,7 @@ def encrypt_file_to_stego(
     binary_payload = _build_payload(
         flags, profile_id, extension, salt, nonce, ciphertext, tag
     )
-    log(
-        f"Binary payload: {len(binary_payload):,} bytes  "
-        f"(header + ciphertext + tag)"
-    )
+    log(f"Binary payload: {len(binary_payload):,} bytes  (header + ciphertext + tag)")
 
     # ── 5. Capacity check ─────────────────────────────────────────────────
     cap = capacity_bytes(cover_text, profile_id)
@@ -612,7 +702,7 @@ def encrypt_file_to_stego(
 
     # ── 6. Embed ──────────────────────────────────────────────────────────
     log("Embedding invisible symbols into cover text ...")
-    stego = embed_payload(cover_text, binary_payload, profile_id, password)
+    stego  = embed_payload(cover_text, binary_payload, profile_id, password)
     n_syms = sum(1 for ch in stego if _is_stego(ch))
     log(
         f"Embedded {n_syms:,} invisible symbols "
@@ -720,7 +810,7 @@ def decrypt_stego_file(
 
 
 # =============================================================================
-# §8  UTILITIES & SELF-TEST
+# §9  UTILITIES & SELF-TEST
 # =============================================================================
 
 def print_profiles() -> None:
@@ -744,25 +834,147 @@ def estimate_cover_chars(file_bytes: int, profile_id: int,
     Estimate minimum cover text character count for the given file size.
     compression_ratio: assumed fraction after zlib (0.65 is conservative).
     """
-    n_alpha  = len(_get_profile_chars(profile_id))
-    bps      = math.log2(n_alpha)
+    n_alpha = len(_get_profile_chars(profile_id))
     # header overhead (conservative): ~60 bytes
-    payload  = int(file_bytes * compression_ratio) + 60
-    n_syms   = math.ceil(8 * payload / bps) + _PREFIX_SYMS
-    return n_syms + 2   # +2: we need (n_syms) gaps → (n_syms+1) chars minimum
+    payload = int(file_bytes * compression_ratio) + 60
+    n_syms  = _num_symbols(payload, n_alpha) + _PREFIX_SYMS   # §3 — exact
+    return n_syms + 2   # need n_syms gaps → n_syms+1 chars minimum, +1 safety
 
+
+# -----------------------------------------------------------------------------
+# Stage 1 self-test — pure base-N arithmetic, no Unicode
+# -----------------------------------------------------------------------------
+
+def test_base_n(verbose: bool = True) -> bool:
+    """
+    Stage 1 self-test: verify _encode_bytes_to_digits / _decode_digits_to_bytes
+    for a range of alphabet sizes N, without any Unicode involvement.
+
+    Tested N values : 2, 4, 8, 10, 16, 26, 64, 122, 128, 256, 300
+    Test patterns   : empty · 1-byte (0x00, 0xFF, 0xA7) · 2-byte 0x00FF
+                      · 10-byte all-zero · 10-byte all-0xFF · 10-byte random
+                      · 100-byte random · leading-zero 10-byte
+                      · 1 000-byte random · 100-byte all-zero · 100-byte all-0xFF
+
+    Returns True only if every test case passes for every N.
+    """
+    STAGE1_N_VALUES = [2, 4, 8, 10, 16, 26, 64, 122, 128, 256, 300]
+
+    # Build test cases once per test_base_n() call so random data varies
+    test_cases = [
+        ("empty",              b""),
+        ("1-B 0x00",           b"\x00"),
+        ("1-B 0xFF",           b"\xFF"),
+        ("1-B 0xA7",           b"\xA7"),
+        ("2-B 0x00FF",         b"\x00\xFF"),
+        ("10-B all-zero",      b"\x00" * 10),
+        ("10-B all-0xFF",      b"\xFF" * 10),
+        ("10-B random",        os.urandom(10)),
+        ("100-B random",       os.urandom(100)),
+        ("leading zeros 10-B", b"\x00\x00\x00" + os.urandom(7)),
+        ("1000-B random",      os.urandom(1000)),
+        ("100-B all-zero",     b"\x00" * 100),
+        ("100-B all-0xFF",     b"\xFF" * 100),
+    ]
+
+    n_cases = len(test_cases)
+
+    print("\n  ── STAGE 1: BASE-N ENCODE/DECODE SELF-TEST ──────────────────────────────")
+    print(f"  N values  : {STAGE1_N_VALUES}")
+    print(f"  Cases/N   : {n_cases}  "
+          "(empty · 1-B · 2-B · all-zero · all-0xFF · random · leading-zero · 1 kB)")
+    print()
+    print(f"  {'N':>5}  {'log₂N':>7}  {'100B→k':>7}  result")
+    print(f"  {'─'*5}  {'─'*7}  {'─'*7}  {'─'*42}")
+
+    all_ok   = True
+    failures: list = []
+
+    for n in STAGE1_N_VALUES:
+        log2n      = math.log2(n)
+        k_100      = _num_symbols(100, n)
+        n_fail_before = len(failures)
+
+        for label, data in test_cases:
+            try:
+                # ── encode ────────────────────────────────────────────────
+                digits = _encode_bytes_to_digits(data, n)
+
+                # Structural invariants
+                expected_k = _num_symbols(len(data), n)
+                if len(digits) != expected_k:
+                    raise AssertionError(
+                        f"digit count {len(digits)} != _num_symbols={expected_k}"
+                    )
+                if digits and (min(digits) < 0 or max(digits) >= n):
+                    raise AssertionError(
+                        f"digit(s) outside [0,{n}): "
+                        f"min={min(digits)}, max={max(digits)}"
+                    )
+
+                # ── decode ────────────────────────────────────────────────
+                recovered = _decode_digits_to_bytes(digits, n, len(data))
+
+                if recovered != data:
+                    raise AssertionError(
+                        "round-trip mismatch\n"
+                        f"  original : {data.hex()}\n"
+                        f"  recovered: {recovered.hex()}"
+                    )
+
+            except Exception as exc:
+                all_ok = False
+                failures.append((n, label, str(exc)))
+
+        n_failed = len(failures) - n_fail_before
+        n_passed = n_cases - n_failed
+
+        if n_failed == 0:
+            print(f"  {n:>5}  {log2n:>7.4f}  {k_100:>7}  ✓ {n_passed}/{n_cases}")
+        else:
+            print(f"  {n:>5}  {log2n:>7.4f}  {k_100:>7}  ✗ {n_passed}/{n_cases}"
+                  f"  ({n_failed} FAILED)")
+
+    total = len(STAGE1_N_VALUES) * n_cases
+    print()
+    if all_ok:
+        print(f"  Stage 1 PASSED ✓  ({total}/{total} cases, 0 failures)")
+    else:
+        print(f"  Stage 1 FAILED ✗  ({len(failures)}/{total} cases failed):")
+        for fn, label, msg in failures:
+            short = msg.splitlines()[0][:70]
+            print(f"    N={fn:<4}  {label:<24}  {short}")
+    print()
+    return all_ok
+
+
+# -----------------------------------------------------------------------------
+# Stage 2 + combined self_test
+# -----------------------------------------------------------------------------
 
 def self_test(verbose: bool = True) -> bool:
-    """Round-trip self-test for all three profiles. Returns True if all pass."""
+    """
+    Full self-test:
+      Stage 1 — base-N arithmetic (11 N values × 13 patterns = 143 cases)
+      Stage 2 — full encrypt → embed → extract → decrypt round-trip
+                for all three alphabet profiles
 
-    def log(msg: str) -> None:
-        if verbose: print(f"    {msg}")
+    Returns True only if all tests pass.
+    Stage 2 is skipped if Stage 1 fails.
+    """
 
-    print("\n  ── SELF-TEST ──────────────────────────────────────────────")
+    # ── Stage 1: pure base-N arithmetic ──────────────────────────────────────
+    stage1_ok = test_base_n(verbose=verbose)
+    if not stage1_ok:
+        print("  !! Stage 1 failures detected — skipping Stage 2.")
+        return False
+
+    # ── Stage 2: full encrypt → embed → extract → decrypt ────────────────────
+    print("\n  ── STAGE 2: FULL ROUND-TRIP SELF-TEST ──────────────────────────────────")
+
     password  = "TestP@ssw0rd!"
     test_data = b"The quick brown fox jumps over the lazy dog. " * 20 + os.urandom(80)
 
-    # A cover text long enough for all profiles
     cover = (
         "In the beginning God created the heaven and the earth.  "
         "And the earth was without form, and void; and darkness was upon "
@@ -789,13 +1001,13 @@ def self_test(verbose: bool = True) -> bool:
                 profile_id, verbose=verbose,
             )
             if not ok:
-                print(f"    [✗] Encryption failed"); all_ok = False; continue
+                print("    [✗] Encryption failed"); all_ok = False; continue
 
             ok = decrypt_stego_file(
                 stego_path, password, out_base, verbose=verbose,
             )
             if not ok:
-                print(f"    [✗] Decryption failed"); all_ok = False; continue
+                print("    [✗] Decryption failed"); all_ok = False; continue
 
             recovered_path = out_base + ".bin"
             with open(recovered_path, "rb") as fh:
@@ -804,7 +1016,7 @@ def self_test(verbose: bool = True) -> bool:
             if recovered == test_data:
                 print(f"    [✓] Round-trip OK — {len(test_data):,} bytes verified")
             else:
-                print(f"    [✗] Data mismatch!")
+                print("    [✗] Data mismatch!")
                 all_ok = False
 
         finally:
@@ -819,7 +1031,7 @@ def self_test(verbose: bool = True) -> bool:
 
 
 # =============================================================================
-# §9  CLI — Interactive menu + argparse
+# §10  CLI — Interactive menu + argparse
 # =============================================================================
 
 _BANNER = r"""
@@ -911,7 +1123,7 @@ def _menu_info() -> None:
         print(f"\n  Minimum cover text characters for a {file_bytes:,}-byte file:")
         for pid in (PROFILE_SAFE, PROFILE_EXTENDED, PROFILE_MAX):
             n = estimate_cover_chars(file_bytes, pid)
-            print(f"    {PROFILE_NAMES[pid]:12s}: ≥ {n:,} characters")
+            print(f"    {PROFILE_NAMES[pid]:12s}: >= {n:,} characters")
     print()
 
 
@@ -921,7 +1133,8 @@ def _interactive_menu() -> None:
     print("  [1]  Encrypt file  →  stego text")
     print("  [2]  Decrypt stego text  →  original file")
     print("  [3]  Profile & capacity info")
-    print("  [4]  Self-test (round-trip benchmark)")
+    print("  [4]  Self-test  (Stage 1 base-N + Stage 2 full round-trip)")
+    print("  [5]  Stage 1 only: base-N arithmetic test")
     print("  [Q]  Quit")
     choice = input("\n  Choice: ").strip().upper()
 
@@ -930,6 +1143,7 @@ def _interactive_menu() -> None:
         "2": _menu_decrypt,
         "3": _menu_info,
         "4": lambda: self_test(verbose=True),
+        "5": lambda: test_base_n(verbose=True),
     }
     if choice in dispatch:
         dispatch[choice]()
@@ -950,27 +1164,28 @@ def _build_argparser() -> argparse.ArgumentParser:
             "  python stego_v2.py decrypt output.txt recovered --password mykey\n"
             "  python stego_v2.py info --profile 2 --filesize 50000\n"
             "  python stego_v2.py test\n"
+            "  python stego_v2.py test-base-n\n"
         ),
     )
     sub = parser.add_subparsers(dest="cmd")
 
     # ── encrypt ──
     enc = sub.add_parser("encrypt", help="Encrypt a file into a stego text")
-    enc.add_argument("input",   help="File to hide")
-    enc.add_argument("cover",   help="Cover text file (.txt)")
-    enc.add_argument("output",  help="Output path (saved as .txt)")
+    enc.add_argument("input",  help="File to hide")
+    enc.add_argument("cover",  help="Cover text file (.txt)")
+    enc.add_argument("output", help="Output path (saved as .txt)")
     enc.add_argument("-p", "--password", required=True, help="Encryption password")
     enc.add_argument(
         "--profile", type=int, choices=[0, 1, 2], default=PROFILE_SAFE,
         metavar="N",
-        help="Alphabet profile: 0=SAFE (10 chars), 1=EXTENDED (26), 2=MAX (122).  Default 0.",
+        help="Alphabet profile: 0=SAFE (10), 1=EXTENDED (26), 2=MAX (122).  Default 0.",
     )
     enc.add_argument("-q", "--quiet", action="store_true", help="Suppress progress output")
 
     # ── decrypt ──
     dec = sub.add_parser("decrypt", help="Decrypt a stego text to recover the original file")
-    dec.add_argument("stego",   help="Stego .txt file")
-    dec.add_argument("output",  help="Output path (extension auto-detected from payload)")
+    dec.add_argument("stego",  help="Stego .txt file")
+    dec.add_argument("output", help="Output path (extension auto-detected from payload)")
     dec.add_argument("-p", "--password", required=True, help="Decryption password")
     dec.add_argument("-q", "--quiet", action="store_true", help="Suppress progress output")
 
@@ -985,14 +1200,16 @@ def _build_argparser() -> argparse.ArgumentParser:
         metavar="BYTES", help="Estimate required cover size for this file size",
     )
 
-    # ── test ──
-    sub.add_parser("test", help="Run a full round-trip self-test for all profiles")
+    # ── test / test-base-n ──
+    sub.add_parser("test",
+                   help="Run full self-test (Stage 1 base-N + Stage 2 round-trip)")
+    sub.add_parser("test-base-n",
+                   help="Run Stage 1 base-N arithmetic tests only (no Unicode, no crypto)")
 
     return parser
 
 
 def main() -> None:
-    # If arguments are provided, use argparse; otherwise fall back to the menu.
     if len(sys.argv) > 1:
         parser = _build_argparser()
         args   = parser.parse_args()
@@ -1018,22 +1235,22 @@ def main() -> None:
 
         elif args.cmd == "info":
             print(_BANNER)
-            if args.profile is not None:
-                pids = [args.profile]
-            else:
-                pids = [PROFILE_SAFE, PROFILE_EXTENDED, PROFILE_MAX]
-
+            pids = [args.profile] if args.profile is not None \
+                   else [PROFILE_SAFE, PROFILE_EXTENDED, PROFILE_MAX]
             print_profiles()
-
             if args.filesize:
                 print(f"  Minimum cover text chars for {args.filesize:,}-byte file:")
                 for pid in pids:
                     n = estimate_cover_chars(args.filesize, pid)
-                    print(f"    {PROFILE_NAMES[pid]:12s}: ≥ {n:,} chars")
+                    print(f"    {PROFILE_NAMES[pid]:12s}: >= {n:,} chars")
                 print()
 
         elif args.cmd == "test":
             ok = self_test(verbose=True)
+            sys.exit(0 if ok else 1)
+
+        elif args.cmd == "test-base-n":
+            ok = test_base_n(verbose=True)
             sys.exit(0 if ok else 1)
 
         else:
