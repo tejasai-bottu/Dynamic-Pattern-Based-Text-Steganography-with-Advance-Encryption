@@ -1,0 +1,161 @@
+UNICODE STEGANOGRAPHY V2 — MANUAL COMPATIBILITY TEST FILE
+========================================================================
+
+HOW TO USE THIS FILE
+  1. Open this file in UTF-8 aware editor (VS Code, Notepad++, etc.)
+  2. Copy each test string (the part inside | | markers)
+  3. Paste into target environment: browser, clipboard, OS text field,
+     Word, Excel, Slack, WhatsApp, email, etc.
+  4. Copy it back and paste into a char-count tool OR run:
+       python unicode_compat.py verify '<pasted text>'
+  5. Expected char count is shown after each test string.
+
+  A result of 2 chars instead of 3 means the char was STRIPPED.
+  A different char appearing means the char was CHANGED.
+
+────────────────────────────────────────────────────────────────────────
+§1  INDIVIDUAL CHARACTER TESTS  [Tier 1 and Tier 2 only]
+────────────────────────────────────────────────────────────────────────
+  Format:  HEX  NAME  |A<char>B|  (expected: 3 chars)
+
+  U+00AD    SOFT HYPHEN                                   |A­B|
+  U+034F    COMBINING GRAPHEME JOINER                     |A͏B|
+  U+200B    ZERO WIDTH SPACE                              |A​B|
+  U+200C    ZERO WIDTH NON-JOINER                         |A‌B|
+  U+200D    ZERO WIDTH JOINER                             |A‍B|
+  U+2060    WORD JOINER                                   |A⁠B|
+  U+2061    FUNCTION APPLICATION                          |A⁡B|
+  U+2062    INVISIBLE TIMES                               |A⁢B|
+  U+2063    INVISIBLE SEPARATOR                           |A⁣B|
+  U+2064    INVISIBLE PLUS                                |A⁤B|
+  U+FEFF    ZERO WIDTH NO-BREAK SPACE                     |A﻿B|
+  U+115F    HANGUL CHOSEONG FILLER                        |AᅟB|
+  U+1160    HANGUL JUNGSEONG FILLER                       |AᅠB|
+  U+17B4    KHMER VOWEL INHERENT AQ                       |A឴B|
+  U+17B5    KHMER VOWEL INHERENT AA                       |A឵B|
+  U+180B    MONGOLIAN FREE VARIATION SELECTOR ONE         |A᠋B|
+  U+180C    MONGOLIAN FREE VARIATION SELECTOR TWO         |A᠌B|
+  U+180D    MONGOLIAN FREE VARIATION SELECTOR THREE       |A᠍B|
+  U+180E    MONGOLIAN VOWEL SEPARATOR                     |A᠎B|
+  U+200E    LEFT-TO-RIGHT MARK                            |A‎B|
+  U+200F    RIGHT-TO-LEFT MARK                            |A‏B|
+  U+061C    ARABIC LETTER MARK                            |A؜B|
+  U+202A    LEFT-TO-RIGHT EMBEDDING                       |A‪B|
+  U+202B    RIGHT-TO-LEFT EMBEDDING                       |A‫B|
+  U+202C    POP DIRECTIONAL FORMATTING                    |A‬B|
+  U+202D    LEFT-TO-RIGHT OVERRIDE                        |A‭B|
+  U+202E    RIGHT-TO-LEFT OVERRIDE                        |A‮B|
+  U+2066    LEFT-TO-RIGHT ISOLATE                         |A⁦B|
+  U+2067    RIGHT-TO-LEFT ISOLATE                         |A⁧B|
+  U+2068    FIRST STRONG ISOLATE                          |A⁨B|
+  U+2069    POP DIRECTIONAL ISOLATE                       |A⁩B|
+  U+206A    INHIBIT SYMMETRIC SWAPPING                    |A⁪B|
+  U+206B    ACTIVATE SYMMETRIC SWAPPING                   |A⁫B|
+  U+206C    INHIBIT ARABIC FORM SHAPING                   |A⁬B|
+  U+206D    ACTIVATE ARABIC FORM SHAPING                  |A⁭B|
+  U+206E    NATIONAL DIGIT SHAPES                         |A⁮B|
+  U+206F    NOMINAL DIGIT SHAPES                          |A⁯B|
+  U+3164    HANGUL FILLER                                 |AㅤB|
+  U+FFA0    HALFWIDTH HANGUL FILLER                       |AﾠB|
+  U+FE00    VARIATION SELECTOR-1                          |A︀B|
+  U+FE01    VARIATION SELECTOR-2                          |A︁B|
+  U+FE02    VARIATION SELECTOR-3                          |A︂B|
+  U+FE03    VARIATION SELECTOR-4                          |A︃B|
+  U+FE04    VARIATION SELECTOR-5                          |A︄B|
+  U+FE05    VARIATION SELECTOR-6                          |A︅B|
+  U+FE06    VARIATION SELECTOR-7                          |A︆B|
+  U+FE07    VARIATION SELECTOR-8                          |A︇B|
+  U+FE08    VARIATION SELECTOR-9                          |A︈B|
+  U+FE09    VARIATION SELECTOR-10                         |A︉B|
+  U+FE0A    VARIATION SELECTOR-11                         |A︊B|
+  U+FE0B    VARIATION SELECTOR-12                         |A︋B|
+  U+FE0C    VARIATION SELECTOR-13                         |A︌B|
+  U+FE0D    VARIATION SELECTOR-14                         |A︍B|
+  U+FE0E    VARIATION SELECTOR-15                         |A︎B|
+  U+FE0F    VARIATION SELECTOR-16                         |A️B|
+
+────────────────────────────────────────────────────────────────────────
+§2  REPETITION TESTS  [Tier 1 only]
+────────────────────────────────────────────────────────────────────────
+
+  U+00AD ×10:   |A­­­­­­­­­­B|   (expected 12 chars)
+  U+00AD ×100:  |A­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­B|  (expected 102 chars)
+  U+034F ×10:   |A͏͏͏͏͏͏͏͏͏͏B|   (expected 12 chars)
+  U+034F ×100:  |A͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏͏B|  (expected 102 chars)
+  U+200B ×10:   |A​​​​​​​​​​B|   (expected 12 chars)
+  U+200B ×100:  |A​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​B|  (expected 102 chars)
+  U+200C ×10:   |A‌‌‌‌‌‌‌‌‌‌B|   (expected 12 chars)
+  U+200C ×100:  |A‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌‌B|  (expected 102 chars)
+  U+200D ×10:   |A‍‍‍‍‍‍‍‍‍‍B|   (expected 12 chars)
+  U+200D ×100:  |A‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍‍B|  (expected 102 chars)
+  U+2060 ×10:   |A⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠B|   (expected 12 chars)
+  U+2060 ×100:  |A⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠⁠B|  (expected 102 chars)
+  U+2061 ×10:   |A⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡B|   (expected 12 chars)
+  U+2061 ×100:  |A⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡⁡B|  (expected 102 chars)
+  U+2062 ×10:   |A⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢B|   (expected 12 chars)
+  U+2062 ×100:  |A⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢⁢B|  (expected 102 chars)
+  U+2063 ×10:   |A⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣B|   (expected 12 chars)
+  U+2063 ×100:  |A⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣⁣B|  (expected 102 chars)
+  U+2064 ×10:   |A⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤B|   (expected 12 chars)
+  U+2064 ×100:  |A⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤⁤B|  (expected 102 chars)
+  U+FEFF ×10:   |A﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿B|   (expected 12 chars)
+  U+FEFF ×100:  |A﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿B|  (expected 102 chars)
+
+────────────────────────────────────────────────────────────────────────
+§3  SEQUENCE PAIR TESTS  [Tier 1 pairs]
+────────────────────────────────────────────────────────────────────────
+
+  U+00AD+U+034F  |A­͏B|  (expected 4 chars)
+  U+00AD+U+200B  |A­​B|  (expected 4 chars)
+  U+00AD+U+200C  |A­‌B|  (expected 4 chars)
+  U+00AD+U+200D  |A­‍B|  (expected 4 chars)
+  U+00AD+U+2060  |A­⁠B|  (expected 4 chars)
+  U+00AD+U+2061  |A­⁡B|  (expected 4 chars)
+  U+00AD+U+2062  |A­⁢B|  (expected 4 chars)
+  U+034F+U+200B  |A͏​B|  (expected 4 chars)
+  U+034F+U+200C  |A͏‌B|  (expected 4 chars)
+  U+034F+U+200D  |A͏‍B|  (expected 4 chars)
+  U+034F+U+2060  |A͏⁠B|  (expected 4 chars)
+  U+034F+U+2061  |A͏⁡B|  (expected 4 chars)
+  U+034F+U+2062  |A͏⁢B|  (expected 4 chars)
+  U+200B+U+200C  |A​‌B|  (expected 4 chars)
+  U+200B+U+200D  |A​‍B|  (expected 4 chars)
+  U+200B+U+2060  |A​⁠B|  (expected 4 chars)
+  U+200B+U+2061  |A​⁡B|  (expected 4 chars)
+  U+200B+U+2062  |A​⁢B|  (expected 4 chars)
+  U+200C+U+200D  |A‌‍B|  (expected 4 chars)
+  U+200C+U+2060  |A‌⁠B|  (expected 4 chars)
+  U+200C+U+2061  |A‌⁡B|  (expected 4 chars)
+  U+200C+U+2062  |A‌⁢B|  (expected 4 chars)
+  U+200D+U+2060  |A‍⁠B|  (expected 4 chars)
+  U+200D+U+2061  |A‍⁡B|  (expected 4 chars)
+  U+200D+U+2062  |A‍⁢B|  (expected 4 chars)
+  U+2060+U+2061  |A⁠⁡B|  (expected 4 chars)
+  U+2060+U+2062  |A⁠⁢B|  (expected 4 chars)
+  U+2061+U+2062  |A⁡⁢B|  (expected 4 chars)
+
+────────────────────────────────────────────────────────────────────────
+§4  STEGO SIMULATION  [Tier 1 chars embedded in English text]
+────────────────────────────────────────────────────────────────────────
+
+  Carrier text     : The quick brown fox jumps over the lazy dog.
+  Carrier length   : 44 chars
+  Stego text       : T­he ͏quic​k br‌own ‍fox ⁠jump⁡s ov⁢er t⁣he l⁤azy ﻿dog.
+  Stego length     : 55 chars (expected 55)
+  Invisible count  : 11
+
+  After pasting the stego text into your test environment and retrieving
+  it, the invisible count should still match.  If fewer are found, some
+  chars were stripped.  Run 'verify' on the retrieved text to see which.
+
+────────────────────────────────────────────────────────────────────────
+§5  VERIFICATION COMMAND
+────────────────────────────────────────────────────────────────────────
+
+  After retrieving pasted text from any environment, run:
+    python unicode_compat.py verify '<paste text here>'
+
+  To update manual results in the database:
+    python unicode_compat.py load-manual candidates.json --results my_results.json
+
+========================================================================
